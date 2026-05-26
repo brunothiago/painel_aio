@@ -1,5 +1,5 @@
-# Publica o dashboard em GitHub Pages quando o CSV ou o front mudar.
-# O pipeline Gmail/banco roda na máquina local (config.env não vai para o Git).
+# Publica o painel em docs/ na branch main (GitHub Pages — pasta /docs).
+# Alternativa ao artifact deploy quando o Actions falhar.
 
 name: Deploy painel AIO
 
@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -18,7 +18,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,28 +27,31 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Verificar CSV do painel
+      - name: Verificar CSV
         run: |
           LINHAS=$(($(wc -l < dashboard/public/aio_solicitacoes.csv) - 1))
-          echo "Registros AIO no CSV: $LINHAS"
+          echo "Registros AIO: $LINHAS"
           test "$LINHAS" -gt 0
 
-      - name: Instalar e build
+      - name: Build
         working-directory: dashboard
         run: |
-          npm install
+          npm ci
           npm run build
 
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: dashboard/dist
+      - name: Publicar em docs/
+        run: |
+          rm -rf docs
+          cp -r dashboard/dist docs
+          touch docs/.nojekyll
 
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - uses: actions/deploy-pages@v4
-        id: deployment
+      - name: Commit docs/ (se mudou)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/
+          git diff --staged --quiet && echo "docs/ sem alteração" && exit 0
+          git commit -m "Deploy GitHub Pages [automático]"
+
+      - name: Push
+        run: git push

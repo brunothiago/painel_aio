@@ -3,6 +3,8 @@
  *
  * Fluxo de dados:
  *   aio_pipeline.py → PostgreSQL → exportar_csv.py → public/aio_solicitacoes.csv → aqui
+ *
+ * Usa duas fontes e fica com a que tiver mais registros (evita CSV antigo em cache no Pages).
  */
 import React, { useEffect, useState } from 'react';
 import Papa from 'papaparse';
@@ -11,6 +13,8 @@ import { mapearLinhasAIO } from './mapeador';
 import { dadosExemplo, linhasBrutasExemplo } from './dados-exemplo';
 
 const CSV_BASE = `${import.meta.env.BASE_URL}aio_solicitacoes.csv`;
+const CSV_GITHUB_RAW =
+  'https://raw.githubusercontent.com/brunothiago/painel_aio/main/dashboard/public/aio_solicitacoes.csv';
 
 function parseCsvText(text) {
   return new Promise((resolve, reject) => {
@@ -31,10 +35,39 @@ function parseCsvText(text) {
   });
 }
 
+/** Tenta várias URLs e retorna a que tiver mais linhas de dados */
+async function carregarMelhorCsv() {
+  const urls = [
+    { id: 'site', url: `${CSV_BASE}?v=${Date.now()}` },
+    { id: 'github', url: `${CSV_GITHUB_RAW}?v=${Date.now()}` },
+  ];
+
+  let melhor = { id: null, linhas: [] };
+
+  for (const { id, url } of urls) {
+    try {
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) continue;
+      const linhas = await parseCsvText(await res.text());
+      if (linhas.length > melhor.linhas.length) {
+        melhor = { id, linhas };
+      }
+    } catch {
+      /* tenta próxima fonte */
+    }
+  }
+
+  if (melhor.linhas.length === 0) {
+    throw new Error('Não foi possível carregar aio_solicitacoes.csv');
+  }
+  return melhor;
+}
+
 export default function App() {
   const [dados, setDados] = useState([]);
   const [linhasBrutas, setLinhasBrutas] = useState([]);
   const [fonte, setFonte] = useState(null);
+  const [fonteCsv, setFonteCsv] = useState(null);
   const [erro, setErro] = useState(null);
   const [carregando, setCarregando] = useState(true);
 
@@ -45,33 +78,19 @@ export default function App() {
       setCarregando(true);
       setErro(null);
 
-      const url = `${CSV_BASE}?v=${Date.now()}`;
-
       try {
-        const res = await fetch(url, { cache: 'no-store' });
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
-        }
-        const text = await res.text();
-        const linhas = await parseCsvText(text);
-
+        const { id, linhas } = await carregarMelhorCsv();
         if (cancelado) return;
-
-        if (linhas.length === 0) {
-          setErro('CSV vazio — rode: python3 exportar_csv.py');
-          setFonte('exemplo');
-          setDados(dadosExemplo);
-          setLinhasBrutas(linhasBrutasExemplo);
-          return;
-        }
 
         setLinhasBrutas(linhas);
         setDados(mapearLinhasAIO(linhas));
         setFonte('csv');
+        setFonteCsv(id === 'github' ? 'GitHub (atualizado)' : 'site');
       } catch (e) {
         if (cancelado) return;
-        setErro(`Não foi possível ler ${CSV_BASE} (${e.message})`);
+        setErro(e.message);
         setFonte('exemplo');
+        setFonteCsv(null);
         setDados(dadosExemplo);
         setLinhasBrutas(linhasBrutasExemplo);
       } finally {
@@ -127,7 +146,10 @@ export default function App() {
             textAlign: 'center',
           }}
         >
-          Dados carregados de aio_solicitacoes.csv ({dados.length} registros)
+          Dados carregados ({dados.length} registros)
+          {fonteCsv && (
+            <span style={{ opacity: 0.85 }}> — fonte: {fonteCsv}</span>
+          )}
         </div>
       )}
       <DashboardAIO
