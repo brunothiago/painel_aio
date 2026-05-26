@@ -270,10 +270,15 @@ export default function DashboardAIO({ dados = dadosExemplo, linhasBrutas = [] }
   const POR_PAGINA = 10;
 
   /* ---------- filtros globais (topo do painel) ---------- */
-  const programasOpcoes = useMemo(
-    () => [...new Set(dados.map((d) => d.programaCurto))].sort(),
-    [dados]
-  );
+  const programasOpcoes = useMemo(() => {
+    const contagem = {};
+    dados.forEach((d) => {
+      contagem[d.programaCurto] = (contagem[d.programaCurto] || 0) + 1;
+    });
+    return Object.entries(contagem)
+      .map(([nome, qtd]) => ({ nome, qtd }))
+      .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+  }, [dados]);
   const semanasOpcoes = useMemo(() => listarSemanasOpcoes(dados), [dados]);
 
   const dadosBase = useMemo(() => {
@@ -487,7 +492,6 @@ export default function DashboardAIO({ dados = dadosExemplo, linhasBrutas = [] }
           totalBase={dados.length}
           totalFiltrado={dadosBase.length}
           onLimpar={resetFiltrosGlobais}
-          corPrograma={corPrograma}
         />
 
         {/* ================ KPIs ================ */}
